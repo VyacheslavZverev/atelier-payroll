@@ -1,0 +1,16 @@
+{
+  "name": "atelier-payroll",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weekly payroll app for a small tailoring shop (invoice photo -> payout sheet)",
+  "scripts": {
+    "start": "node server/index.js",
+    "build": "npm --prefix client run build",
+    "icons": "node tools/gen-icons.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "express": "^5.2.1"
+  }
+}
