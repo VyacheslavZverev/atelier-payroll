@@ -373,8 +373,8 @@ body {
 
 .invoice-head {
   display: grid;
-  grid-template-columns: 1fr 84px 52px 32px;
-  gap: 6px;
+  grid-template-columns: 22px 1fr 80px 50px 30px;
+  gap: 5px;
   padding: 4px 6px;
   font-size: 0.72rem;
   color: var(--muted);
@@ -382,12 +382,20 @@ body {
 
 .invoice-row {
   display: grid;
-  grid-template-columns: 1fr 84px 52px 32px;
-  gap: 6px;
+  grid-template-columns: 22px 1fr 80px 50px 30px;
+  gap: 5px;
   align-items: center;
   padding: 6px;
   border-top: 1px solid var(--border);
   border-radius: 8px;
+}
+
+/* Leading row counter (1. 2. 3. …) — just a position, not the invoice number. */
+.col-ord {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Compact inputs inside invoice rows: the № must fit 4-5 digits on a phone. */
@@ -468,6 +476,20 @@ body {
 .add-row-btn {
   width: 100%;
   margin-top: 6px;
+}
+
+.invoice-count {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  padding: 8px 6px 2px;
+  border-top: 1px solid var(--border);
+  font-size: 1rem;
+}
+
+.invoice-count b {
+  font-size: 1.1rem;
 }
 
 .totals-block .total-line {
@@ -654,6 +676,15 @@ body {
 
 .sheet-unpaid td {
   color: #b91c1c;
+}
+
+.sheet-count {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px;
+  font-size: 1.02rem;
+  font-variant-numeric: tabular-nums;
+  border-top: 1px dotted #999;
 }
 
 .sheet-totals {

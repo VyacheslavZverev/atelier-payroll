@@ -143,6 +143,17 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
   const standing = adjustments.filter((a) => a.type === 'standing');
   const custom = adjustments.filter((a) => a.type === 'custom');
 
+  // Display order: by invoice number ascending, regardless of how rows were
+  // added. Rows without a number yet (just added / unrecognized) go last so
+  // they do not disrupt the numbered list. Re-sorts only after a number is
+  // committed (on blur), never mid-typing.
+  const sortedInvoices = [...invoices].sort((a, b) => {
+    if (a.number == null && b.number == null) return a.id - b.id;
+    if (a.number == null) return 1;
+    if (b.number == null) return -1;
+    return a.number - b.number;
+  });
+
   return (
     <div className="screen">
       <header className="app-header">
@@ -210,16 +221,18 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
 
       <section className="card invoice-list">
         <div className="invoice-head">
+          <span className="col-ord">#</span>
           <span className="col-num">№ накладной</span>
           <span className="col-amount">Сумма</span>
           <span className="col-paid">Оплачено</span>
           <span className="col-x"></span>
         </div>
         {invoices.length === 0 && <p className="muted center">Пока нет накладных</p>}
-        {invoices.map((inv) => (
+        {sortedInvoices.map((inv, i) => (
           <InvoiceRow
             key={inv.id}
             inv={inv}
+            ordinal={i + 1}
             onPatch={(patch) => patchInvoice(inv.id, patch)}
             onDelete={() => deleteInvoice(inv.id)}
             onShowPhoto={() => inv.photo_ref && setPhotoView(inv.photo_ref)}
@@ -228,6 +241,12 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
         <button className="btn btn-ghost add-row-btn" onClick={addManualRow}>
           + Добавить строку
         </button>
+        {invoices.length > 0 && (
+          <div className="invoice-count">
+            <span>Количество накладных</span>
+            <b>{invoices.length}</b>
+          </div>
+        )}
       </section>
 
       <section className="card totals-block">
@@ -352,13 +371,14 @@ function NumberInput({ value, onCommit }) {
   );
 }
 
-function InvoiceRow({ inv, onPatch, onDelete, onShowPhoto }) {
+function InvoiceRow({ inv, ordinal, onPatch, onDelete, onShowPhoto }) {
   const classes = ['invoice-row'];
   if (inv.needs_review) classes.push('row-review');
   if (!inv.paid) classes.push('row-unpaid');
 
   return (
     <div className={classes.join(' ')}>
+      <div className="col-ord">{ordinal}</div>
       <div className="col-num row-num-cell">
         {inv.photo_ref && (
           <button className="thumb-btn" onClick={onShowPhoto} title="Показать фото">

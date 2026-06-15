@@ -28,13 +28,19 @@ export default function Summary({ weekId, employeeId, shopName, onBack, onError 
   }
 
   const { week, employee, invoices, adjustments, sum, half, payout } = data;
-  const paidInvoices = invoices.filter((i) => i.paid);
-  const unpaidInvoices = invoices.filter((i) => !i.paid);
+
+  // Same order as the review screen: by invoice number ascending, unfilled
+  // rows last. Unpaid invoices stay marked inline rather than grouped.
+  const orderedInvoices = [...invoices].sort((a, b) => {
+    if (a.number == null && b.number == null) return a.id - b.id;
+    if (a.number == null) return 1;
+    if (b.number == null) return -1;
+    return a.number - b.number;
+  });
 
   // Long single-column lists waste an A4 sheet, so split into balanced
-  // columns once there are many rows (paid first, then unpaid). Aim for
-  // ~22 rows per column, capped at 3 columns to stay legible on A4.
-  const orderedInvoices = [...paidInvoices, ...unpaidInvoices];
+  // columns once there are many rows. Aim for ~22 rows per column, capped at
+  // 3 columns to stay legible on A4.
   const ROWS_PER_COLUMN = 22;
   const columnCount = Math.min(3, Math.max(1, Math.ceil(orderedInvoices.length / ROWS_PER_COLUMN)));
   const perColumn = Math.ceil(orderedInvoices.length / columnCount);
@@ -47,17 +53,12 @@ export default function Summary({ weekId, employeeId, shopName, onBack, onError 
     lines.push(shopName);
     lines.push(`${employee.name} — ${week.label} (${fmtDate(week.date)})`);
     lines.push('');
-    for (const inv of paidInvoices) {
-      lines.push(`№ ${inv.number ?? '—'}\t${fmt(inv.amount)}`);
-    }
-    if (unpaidInvoices.length > 0) {
-      lines.push('');
-      lines.push('Без оплаты (не в сумме):');
-      for (const inv of unpaidInvoices) {
-        lines.push(`№ ${inv.number ?? '—'}\t${fmt(inv.amount)}`);
-      }
+    for (const inv of orderedInvoices) {
+      const mark = inv.paid ? '' : ' (без оплаты)';
+      lines.push(`№ ${inv.number ?? '—'}${mark}\t${fmt(inv.amount)}`);
     }
     lines.push('');
+    lines.push(`Количество накладных: ${orderedInvoices.length}`);
     lines.push(`Сумма: ${fmt(sum)}`);
     lines.push(`Заработано: ${fmt(half)}`);
     for (const adj of adjustments) {
@@ -180,6 +181,11 @@ export default function Summary({ weekId, employeeId, shopName, onBack, onError 
               </tbody>
             </table>
           ))}
+        </div>
+
+        <div className="sheet-count">
+          <span>Количество накладных</span>
+          <b>{orderedInvoices.length}</b>
         </div>
 
         <div className="sheet-totals">
