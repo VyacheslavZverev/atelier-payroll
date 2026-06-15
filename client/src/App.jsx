@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, getToken, setToken, AuthError } from './api.js';
+import { api, setToken, markActive, isUnlocked, AuthError } from './api.js';
 import Login from './views/Login.jsx';
 import Home from './views/Home.jsx';
 import Employee from './views/Employee.jsx';
 import Summary from './views/Summary.jsx';
 
 export default function App() {
-  const [authed, setAuthed] = useState(Boolean(getToken()));
+  // Unlocked only if a token exists AND the app was used recently; otherwise
+  // she is sent back to the PIN screen (inactivity lock).
+  const [authed, setAuthed] = useState(isUnlocked());
   const [config, setConfig] = useState({ shop_name: 'Ателье', vision_ready: true });
   const [weeks, setWeeks] = useState([]);
   const [weekId, setWeekId] = useState(null);
@@ -48,11 +50,28 @@ export default function App() {
     })();
   }, [authed, loadWeeks, handleError]);
 
+  // Re-check the inactivity lock whenever the app returns to the foreground —
+  // a PWA can stay backgrounded for hours without a page reload.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState !== 'visible') return;
+      if (isUnlocked()) markActive();
+      else setAuthed(false);
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, []);
+
   if (!authed) {
     return (
       <Login
         onLogin={(token, cfg) => {
           setToken(token);
+          markActive();
           setConfig((c) => ({ ...c, ...cfg }));
           setAuthed(true);
         }}
