@@ -243,6 +243,8 @@ function weekChecks(weekId) {
     byNumber.get(r.number).push(r);
   }
 
+  // A given invoice number is unique across the whole shop, so the same number
+  // appearing for two employees in one week means someone mis-entered it.
   const duplicates = [...byNumber.entries()]
     .filter(([, list]) => list.length > 1)
     .map(([number, list]) => ({
@@ -250,29 +252,11 @@ function weekChecks(weekId) {
       entries: list.map((r) => ({ employee_name: r.employee_name, amount: r.amount }))
     }));
 
-  const numbers = [...byNumber.keys()].sort((a, b) => a - b);
-  let missing = [];
-  let missingTruncated = false;
-  if (numbers.length >= 2) {
-    const min = numbers[0];
-    const max = numbers[numbers.length - 1];
-    const present = new Set(numbers);
-    for (let n = min + 1; n < max; n++) {
-      if (!present.has(n)) {
-        missing.push(n);
-        if (missing.length >= 100) {
-          missingTruncated = true;
-          break;
-        }
-      }
-    }
-  }
-
   const unpaid = rows
     .filter((r) => !r.paid)
     .map((r) => ({ employee_name: r.employee_name, number: r.number, amount: r.amount }));
 
-  return { duplicates, missing, missing_truncated: missingTruncated, unpaid };
+  return { duplicates, unpaid };
 }
 
 app.get('/api/weeks/:weekId/checks', (req, res) => {
@@ -329,6 +313,29 @@ app.patch('/api/invoices/:id', (req, res) => {
 app.delete('/api/invoices/:id', (req, res) => {
   db.prepare('DELETE FROM invoices WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
+});
+
+// Delete several invoices in one request (the review screen's "select" mode).
+// Removes photo files that no invoice references anymore.
+app.post('/api/invoices/bulk-delete', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
+  if (ids.length === 0) return res.json({ ok: true, deleted: 0 });
+  const placeholders = ids.map(() => '?').join(',');
+  const refs = db
+    .prepare(`SELECT DISTINCT photo_ref FROM invoices WHERE id IN (${placeholders}) AND photo_ref IS NOT NULL`)
+    .all(...ids);
+  const info = db.prepare(`DELETE FROM invoices WHERE id IN (${placeholders})`).run(...ids);
+  const stillUsed = db.prepare('SELECT COUNT(*) AS c FROM invoices WHERE photo_ref = ?');
+  for (const { photo_ref } of refs) {
+    if (stillUsed.get(photo_ref).c === 0) {
+      try {
+        fs.unlinkSync(path.join(PHOTOS_DIR, photo_ref));
+      } catch {
+        // already gone — fine
+      }
+    }
+  }
+  res.json({ ok: true, deleted: info.changes });
 });
 
 // ---------------------------------------------------------------- adjustments

@@ -478,6 +478,37 @@ body {
   margin-top: 6px;
 }
 
+.select-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.select-bar .btn {
+  min-height: 38px;
+  padding: 6px 10px;
+}
+
+.select-bar .btn-danger-text {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.select-checkbox {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--primary);
+}
+
+.row-selected {
+  background: #eef2ff;
+  outline: 2px solid var(--primary);
+}
+
 .invoice-count {
   display: flex;
   justify-content: space-between;
@@ -588,6 +619,122 @@ body {
 
 .photo-overlay .muted {
   color: #d1d5db;
+}
+
+/* ---------- in-app camera ---------- */
+
+.camera-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+}
+
+.camera-video {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  min-height: 0;
+}
+
+.camera-close {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.camera-thumbs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 12px;
+}
+
+.camera-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+}
+
+.camera-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.camera-thumb-x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  padding: 0 4px;
+  border-bottom-left-radius: 6px;
+}
+
+.camera-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  background: #000;
+}
+
+.camera-count {
+  position: absolute;
+  left: 16px;
+  color: #d1d5db;
+  font-size: 0.85rem;
+  max-width: 30%;
+}
+
+.camera-shutter {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+}
+
+.camera-shutter:disabled {
+  opacity: 0.5;
+}
+
+.camera-shutter:active {
+  transform: scale(0.94);
+}
+
+.camera-done {
+  position: absolute;
+  right: 16px;
 }
 
 /* ---------- summary sheet ---------- */

@@ -60,7 +60,7 @@ export default function Summary({ weekId, employeeId, shopName, onBack, onError 
     lines.push('');
     lines.push(`Количество накладных: ${orderedInvoices.length}`);
     lines.push(`Сумма: ${fmt(sum)}`);
-    lines.push(`Заработано: ${fmt(half)}`);
+    lines.push(`50%: ${fmt(half)}`);
     for (const adj of adjustments) {
       if (adj.amount === 0) continue;
       const datePart = adj.type === 'custom' && adj.date ? ` (${fmtDate(adj.date)})` : '';
@@ -194,7 +194,7 @@ export default function Summary({ weekId, employeeId, shopName, onBack, onError 
             <b>{fmt(sum)}</b>
           </div>
           <div className="sheet-line sheet-earned">
-            <span>Заработано</span>
+            <span>50%</span>
             <b>{fmt(half)}</b>
           </div>
           {adjustments

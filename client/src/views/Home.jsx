@@ -77,7 +77,7 @@ export default function Home({ weeks, weekId, onSelectWeek, onNewWeek, onDeleteW
 
   const checks = overview?.checks;
   const checksCount = checks
-    ? checks.duplicates.length + checks.missing.length + checks.unpaid.length
+    ? checks.duplicates.length + checks.unpaid.length
     : 0;
 
   return (
@@ -206,15 +206,6 @@ export default function Home({ weeks, weekId, onSelectWeek, onNewWeek, onDeleteW
                     {d.entries.map((en) => `${en.employee_name} (${fmt(en.amount)} ₽)`).join(', ')}
                   </p>
                 ))
-              )}
-              <h3>Пропущенные номера</h3>
-              {checks.missing.length === 0 ? (
-                <p className="muted">Нет</p>
-              ) : (
-                <p className="check-line">
-                  {checks.missing.join(', ')}
-                  {checks.missing_truncated ? ' …' : ''}
-                </p>
               )}
               <h3>Не оплачено</h3>
               {checks.unpaid.length === 0 ? (

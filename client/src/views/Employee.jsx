@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, photoUrl } from '../api.js';
 import { fmt, fmtDate, fileToDataUrl } from '../util.js';
+import CameraCapture from './CameraCapture.jsx';
+
+const cameraSupported =
+  typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
 
 export default function Employee({ weekId, employeeId, visionReady, onBack, onSummary, onError }) {
   const [data, setData] = useState(null); // { week, employee, invoices, adjustments, ... }
@@ -8,6 +12,9 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
   const [scanNotice, setScanNotice] = useState('');
   const [photoView, setPhotoView] = useState(null); // photo_ref shown full-screen
   const [showCustomForm, setShowCustomForm] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [cameraOpen, setCameraOpen] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
@@ -70,6 +77,35 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
     try {
       await api(`/api/invoices/${id}`, { method: 'DELETE' });
       setData((d) => (d ? { ...d, invoices: d.invoices.filter((i) => i.id !== id) } : d));
+    } catch (e) {
+      onError(e);
+    }
+  }
+
+  // ---------------- bulk selection / delete ----------------
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function deleteSelected() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!confirm(`Удалить выбранные накладные (${ids.length})? Это действие нельзя отменить.`)) return;
+    try {
+      await api('/api/invoices/bulk-delete', { method: 'POST', body: { ids } });
+      setData((d) => (d ? { ...d, invoices: d.invoices.filter((i) => !selectedIds.has(i.id)) } : d));
+      exitSelectMode();
     } catch (e) {
       onError(e);
     }
@@ -191,11 +227,22 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
         }}
       />
 
+      {cameraOpen && (
+        <CameraCapture
+          onCancel={() => setCameraOpen(false)}
+          onError={(e) => onError(e)}
+          onDone={(blobs) => {
+            setCameraOpen(false);
+            if (blobs.length > 0) handleFiles(blobs);
+          }}
+        />
+      )}
+
       <section className="capture-block">
         <button
           className="btn btn-primary btn-big"
           disabled={Boolean(scanProgress)}
-          onClick={() => cameraInputRef.current?.click()}
+          onClick={() => (cameraSupported ? setCameraOpen(true) : cameraInputRef.current?.click())}
         >
           📷 Сфотографировать накладные
         </button>
@@ -220,8 +267,42 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
       </section>
 
       <section className="card invoice-list">
+        {invoices.length > 0 && (
+          <div className="select-bar">
+            {selectMode ? (
+              <>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() =>
+                    setSelectedIds(
+                      selectedIds.size === invoices.length
+                        ? new Set()
+                        : new Set(invoices.map((i) => i.id))
+                    )
+                  }
+                >
+                  {selectedIds.size === invoices.length ? 'Снять все' : 'Выбрать все'}
+                </button>
+                <button
+                  className="btn btn-danger-text"
+                  disabled={selectedIds.size === 0}
+                  onClick={deleteSelected}
+                >
+                  Удалить ({selectedIds.size})
+                </button>
+                <button className="btn btn-ghost" onClick={exitSelectMode}>
+                  Отмена
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-ghost" onClick={() => setSelectMode(true)}>
+                Выбрать
+              </button>
+            )}
+          </div>
+        )}
         <div className="invoice-head">
-          <span className="col-ord">#</span>
+          <span className="col-ord">{selectMode ? '' : '#'}</span>
           <span className="col-num">№ накладной</span>
           <span className="col-amount">Сумма</span>
           <span className="col-paid">Оплачено</span>
@@ -233,14 +314,19 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
             key={inv.id}
             inv={inv}
             ordinal={i + 1}
+            selectMode={selectMode}
+            selected={selectedIds.has(inv.id)}
+            onToggleSelected={() => toggleSelected(inv.id)}
             onPatch={(patch) => patchInvoice(inv.id, patch)}
             onDelete={() => deleteInvoice(inv.id)}
             onShowPhoto={() => inv.photo_ref && setPhotoView(inv.photo_ref)}
           />
         ))}
-        <button className="btn btn-ghost add-row-btn" onClick={addManualRow}>
-          + Добавить строку
-        </button>
+        {!selectMode && (
+          <button className="btn btn-ghost add-row-btn" onClick={addManualRow}>
+            + Добавить строку
+          </button>
+        )}
         {invoices.length > 0 && (
           <div className="invoice-count">
             <span>Количество накладных</span>
@@ -255,7 +341,7 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
           <b>{fmt(sum)} ₽</b>
         </div>
         <div className="total-line">
-          <span>Заработано</span>
+          <span>50%</span>
           <b>{fmt(half)} ₽</b>
         </div>
       </section>
@@ -371,14 +457,33 @@ function NumberInput({ value, onCommit }) {
   );
 }
 
-function InvoiceRow({ inv, ordinal, onPatch, onDelete, onShowPhoto }) {
+function InvoiceRow({ inv, ordinal, selectMode, selected, onToggleSelected, onPatch, onDelete, onShowPhoto }) {
   const classes = ['invoice-row'];
   if (inv.needs_review) classes.push('row-review');
   if (!inv.paid) classes.push('row-unpaid');
+  if (selectMode && selected) classes.push('row-selected');
+
+  // In select mode, tapping anywhere on the row (except its inputs) toggles it.
+  function onRowClick(e) {
+    if (!selectMode) return;
+    if (e.target.closest('input, button')) return;
+    onToggleSelected();
+  }
 
   return (
-    <div className={classes.join(' ')}>
-      <div className="col-ord">{ordinal}</div>
+    <div className={classes.join(' ')} onClick={onRowClick}>
+      <div className="col-ord">
+        {selectMode ? (
+          <input
+            type="checkbox"
+            className="select-checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+          />
+        ) : (
+          ordinal
+        )}
+      </div>
       <div className="col-num row-num-cell">
         {inv.photo_ref && (
           <button className="thumb-btn" onClick={onShowPhoto} title="Показать фото">
@@ -405,7 +510,7 @@ function InvoiceRow({ inv, ordinal, onPatch, onDelete, onShowPhoto }) {
         />
       </div>
       <div className="col-x">
-        {inv.needs_review ? (
+        {selectMode ? null : inv.needs_review ? (
           <button
             className="btn btn-ghost btn-x confirm-btn"
             title="Подтвердить"
