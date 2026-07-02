@@ -3,8 +3,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { get, all, run, batch, DATA_DIR, ROOT_DIR, ensureStandingAdjustments } from './db.js';
-import { savePhoto, locatePhoto, deletePhoto } from './storage.js';
+import { get, all, run, batch, DATA_DIR, ROOT_DIR, IS_CLOUD_DB, ensureStandingAdjustments } from './db.js';
+import { savePhoto, locatePhoto, deletePhoto, IS_BLOB_STORAGE } from './storage.js';
 import { readInvoicesFromImage, isVisionConfigured } from './vision.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -71,7 +71,12 @@ app.use('/api', async (req, res, next) => {
 // ---------------------------------------------------------------- config
 
 app.get('/api/config', (req, res) => {
-  res.json({ shop_name: SHOP_NAME, vision_ready: isVisionConfigured() });
+  res.json({
+    shop_name: SHOP_NAME,
+    vision_ready: isVisionConfigured(),
+    cloud_db: IS_CLOUD_DB,
+    blob_storage: IS_BLOB_STORAGE
+  });
 });
 
 // ---------------------------------------------------------------- employees
