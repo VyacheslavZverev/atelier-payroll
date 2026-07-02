@@ -1,35 +1,22 @@
+import './env.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { db, DATA_DIR, PHOTOS_DIR, ROOT_DIR, ensureStandingAdjustments } from './db.js';
+import { get, all, run, batch, DATA_DIR, ROOT_DIR, ensureStandingAdjustments } from './db.js';
+import { savePhoto, locatePhoto, deletePhoto } from './storage.js';
 import { readInvoicesFromImage, isVisionConfigured } from './vision.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Externally-set variables (e.g. PORT injected by a process manager) must win
-// over .env values, so capture them before loading the file.
-const externalPort = process.env.PORT;
-try {
-  process.loadEnvFile(path.join(ROOT_DIR, '.env'));
-} catch {
-  // .env is optional; environment variables may be set externally
-}
-// An empty `ANTHROPIC_API_KEY=` line would still occupy its slot in the SDK's
-// credential precedence and shadow OAuth-profile auth — drop empty values.
-for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY']) {
-  if (process.env[key] === '') delete process.env[key];
-}
-
-const PORT = Number(externalPort || process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3000);
 const PIN = process.env.APP_PIN || '1234';
 const SHOP_NAME = process.env.SHOP_NAME || 'Ателье';
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 
-// The production server runs with a hidden console, so errors also go to a
-// file the developer can read: data/server.log.
+// The production PC server runs with a hidden console, so errors also go to a
+// file the developer can read: data/server.log. On Vercel the filesystem is
+// read-only, so only console.error (visible in the dashboard logs) applies.
 function logError(...args) {
   console.error(...args);
   const line = args.map((a) => (a instanceof Error ? a.stack || a.message : String(a))).join(' ');
@@ -49,9 +36,15 @@ function getRequestToken(req) {
   return null;
 }
 
-function isValidToken(token) {
+// Tokens never expire server-side, so a warm instance can cache the ones it
+// has already seen and skip the database round trip.
+const knownTokens = new Set();
+async function isValidToken(token) {
   if (!token) return false;
-  return Boolean(db.prepare('SELECT token FROM sessions WHERE token = ?').get(token));
+  if (knownTokens.has(token)) return true;
+  const row = await get('SELECT token FROM sessions WHERE token = ?', [token]);
+  if (row) knownTokens.add(token);
+  return Boolean(row);
 }
 
 app.post('/api/login', async (req, res) => {
@@ -62,13 +55,14 @@ app.post('/api/login', async (req, res) => {
     return res.status(401).json({ error: 'Неверный PIN-код' });
   }
   const token = crypto.randomBytes(24).toString('hex');
-  db.prepare('INSERT INTO sessions (token) VALUES (?)').run(token);
+  await run('INSERT INTO sessions (token) VALUES (?)', [token]);
+  knownTokens.add(token);
   res.json({ token, shop_name: SHOP_NAME, vision_ready: isVisionConfigured() });
 });
 
-app.use('/api', (req, res, next) => {
+app.use('/api', async (req, res, next) => {
   if (req.path === '/login') return next();
-  if (!isValidToken(getRequestToken(req))) {
+  if (!(await isValidToken(getRequestToken(req)))) {
     return res.status(401).json({ error: 'Требуется вход' });
   }
   next();
@@ -82,36 +76,33 @@ app.get('/api/config', (req, res) => {
 
 // ---------------------------------------------------------------- employees
 
-app.get('/api/employees', (req, res) => {
-  const rows = db.prepare('SELECT * FROM employees ORDER BY status, id').all();
-  res.json(rows);
+app.get('/api/employees', async (req, res) => {
+  res.json(await all('SELECT * FROM employees ORDER BY status, id'));
 });
 
-app.post('/api/employees', (req, res) => {
+app.post('/api/employees', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Введите имя' });
-  const r = db.prepare('INSERT INTO employees (name) VALUES (?)').run(name);
-  res.json(db.prepare('SELECT * FROM employees WHERE id = ?').get(r.lastInsertRowid));
+  const r = await run('INSERT INTO employees (name) VALUES (?)', [name]);
+  res.json(await get('SELECT * FROM employees WHERE id = ?', [r.lastInsertRowid]));
 });
 
-app.patch('/api/employees/:id', (req, res) => {
+app.patch('/api/employees/:id', async (req, res) => {
   const id = Number(req.params.id);
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Введите имя' });
-  db.prepare('UPDATE employees SET name = ? WHERE id = ?').run(name, id);
-  res.json(db.prepare('SELECT * FROM employees WHERE id = ?').get(id));
+  await run('UPDATE employees SET name = ? WHERE id = ?', [name, id]);
+  res.json(await get('SELECT * FROM employees WHERE id = ?', [id]));
 });
 
 // Removing an employee always archives; past weeks must stay intact.
-app.post('/api/employees/:id/archive', (req, res) => {
-  const id = Number(req.params.id);
-  db.prepare("UPDATE employees SET status = 'archived' WHERE id = ?").run(id);
+app.post('/api/employees/:id/archive', async (req, res) => {
+  await run("UPDATE employees SET status = 'archived' WHERE id = ?", [Number(req.params.id)]);
   res.json({ ok: true });
 });
 
-app.post('/api/employees/:id/restore', (req, res) => {
-  const id = Number(req.params.id);
-  db.prepare("UPDATE employees SET status = 'active' WHERE id = ?").run(id);
+app.post('/api/employees/:id/restore', async (req, res) => {
+  await run("UPDATE employees SET status = 'active' WHERE id = ?", [Number(req.params.id)]);
   res.json({ ok: true });
 });
 
@@ -125,62 +116,54 @@ function isoWeekNumber(d) {
   return Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
 }
 
-app.get('/api/weeks', (req, res) => {
-  res.json(db.prepare('SELECT * FROM weeks ORDER BY id DESC').all());
+app.get('/api/weeks', async (req, res) => {
+  res.json(await all('SELECT * FROM weeks ORDER BY id DESC'));
 });
 
-app.post('/api/weeks', (req, res) => {
+app.post('/api/weeks', async (req, res) => {
   const now = new Date();
   const date = now.toISOString().slice(0, 10);
   const label = String(req.body?.label || '').trim() || `Неделя ${isoWeekNumber(now)}`;
-  const r = db.prepare('INSERT INTO weeks (label, date) VALUES (?, ?)').run(label, date);
-  res.json(db.prepare('SELECT * FROM weeks WHERE id = ?').get(r.lastInsertRowid));
+  const r = await run('INSERT INTO weeks (label, date) VALUES (?, ?)', [label, date]);
+  res.json(await get('SELECT * FROM weeks WHERE id = ?', [r.lastInsertRowid]));
 });
 
 // Deletes a week with everything in it (the client double-confirms first).
 // Photo files are removed only when no other week references them.
-app.delete('/api/weeks/:id', (req, res) => {
+app.delete('/api/weeks/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const week = db.prepare('SELECT * FROM weeks WHERE id = ?').get(id);
+  const week = await get('SELECT * FROM weeks WHERE id = ?', [id]);
   if (!week) return res.status(404).json({ error: 'Не найдено' });
 
-  const refs = db
-    .prepare('SELECT DISTINCT photo_ref FROM invoices WHERE week_id = ? AND photo_ref IS NOT NULL')
-    .all(id);
+  const refs = await all(
+    'SELECT DISTINCT photo_ref FROM invoices WHERE week_id = ? AND photo_ref IS NOT NULL',
+    [id]
+  );
 
-  db.exec('BEGIN');
-  try {
-    db.prepare('DELETE FROM invoices WHERE week_id = ?').run(id);
-    db.prepare('DELETE FROM adjustments WHERE week_id = ?').run(id);
-    db.prepare('DELETE FROM weeks WHERE id = ?').run(id);
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
-  }
+  await batch([
+    { sql: 'DELETE FROM invoices WHERE week_id = ?', args: [id] },
+    { sql: 'DELETE FROM adjustments WHERE week_id = ?', args: [id] },
+    { sql: 'DELETE FROM weeks WHERE id = ?', args: [id] }
+  ]);
 
-  const stillUsed = db.prepare('SELECT COUNT(*) AS c FROM invoices WHERE photo_ref = ?');
   for (const { photo_ref } of refs) {
-    if (stillUsed.get(photo_ref).c === 0) {
-      try {
-        fs.unlinkSync(path.join(PHOTOS_DIR, photo_ref));
-      } catch {
-        // already gone — fine
-      }
-    }
+    const used = await get('SELECT COUNT(*) AS c FROM invoices WHERE photo_ref = ?', [photo_ref]);
+    if (used.c === 0) await deletePhoto(photo_ref);
   }
   res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------- calculation
 
-function calcForEmployee(weekId, employeeId) {
-  const invoices = db
-    .prepare('SELECT * FROM invoices WHERE week_id = ? AND employee_id = ? ORDER BY id')
-    .all(weekId, employeeId);
-  const adjustments = db
-    .prepare("SELECT * FROM adjustments WHERE week_id = ? AND employee_id = ? ORDER BY type DESC, id")
-    .all(weekId, employeeId);
+async function calcForEmployee(weekId, employeeId) {
+  const invoices = await all(
+    'SELECT * FROM invoices WHERE week_id = ? AND employee_id = ? ORDER BY id',
+    [weekId, employeeId]
+  );
+  const adjustments = await all(
+    'SELECT * FROM adjustments WHERE week_id = ? AND employee_id = ? ORDER BY type DESC, id',
+    [weekId, employeeId]
+  );
 
   const sum = invoices.reduce((acc, i) => acc + (i.paid ? i.amount : 0), 0);
   const half = Math.round(sum / 2);
@@ -193,19 +176,19 @@ function calcForEmployee(weekId, employeeId) {
 // Monthly analytics: sum of each employee's "50%" across every week whose date
 // falls in the given calendar month (YYYY-MM). Includes archived employees who
 // worked that month. View-only — for the owner.
-app.get('/api/months/:ym/analytics', (req, res) => {
+app.get('/api/months/:ym/analytics', async (req, res) => {
   const ym = String(req.params.ym);
   if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ error: 'Некорректный месяц' });
 
-  const weeks = db.prepare("SELECT * FROM weeks WHERE substr(date, 1, 7) = ? ORDER BY id").all(ym);
-  const employees = db.prepare('SELECT * FROM employees ORDER BY id').all();
+  const weeks = await all("SELECT * FROM weeks WHERE substr(date, 1, 7) = ? ORDER BY id", [ym]);
+  const employees = await all('SELECT * FROM employees ORDER BY id');
 
   const result = [];
   for (const e of employees) {
     let totalHalf = 0;
     const perWeek = [];
     for (const w of weeks) {
-      const { invoices, half } = calcForEmployee(w.id, e.id);
+      const { invoices, half } = await calcForEmployee(w.id, e.id);
       if (invoices.length === 0) continue; // employee didn't work this week
       perWeek.push({ week_id: w.id, label: w.label, half });
       totalHalf += half;
@@ -223,26 +206,27 @@ app.get('/api/months/:ym/analytics', (req, res) => {
 });
 
 // Everything the per-employee calculation screen needs, in one call.
-app.get('/api/weeks/:weekId/employee/:employeeId', (req, res) => {
+app.get('/api/weeks/:weekId/employee/:employeeId', async (req, res) => {
   const weekId = Number(req.params.weekId);
   const employeeId = Number(req.params.employeeId);
-  const week = db.prepare('SELECT * FROM weeks WHERE id = ?').get(weekId);
-  const employee = db.prepare('SELECT * FROM employees WHERE id = ?').get(employeeId);
+  const week = await get('SELECT * FROM weeks WHERE id = ?', [weekId]);
+  const employee = await get('SELECT * FROM employees WHERE id = ?', [employeeId]);
   if (!week || !employee) return res.status(404).json({ error: 'Не найдено' });
-  ensureStandingAdjustments(weekId, employeeId);
-  res.json({ week, employee, ...calcForEmployee(weekId, employeeId) });
+  await ensureStandingAdjustments(weekId, employeeId);
+  res.json({ week, employee, ...(await calcForEmployee(weekId, employeeId)) });
 });
 
 // Home screen: per-employee totals for the week + cross-employee checks.
-app.get('/api/weeks/:weekId/overview', (req, res) => {
+app.get('/api/weeks/:weekId/overview', async (req, res) => {
   const weekId = Number(req.params.weekId);
-  const week = db.prepare('SELECT * FROM weeks WHERE id = ?').get(weekId);
+  const week = await get('SELECT * FROM weeks WHERE id = ?', [weekId]);
   if (!week) return res.status(404).json({ error: 'Не найдено' });
 
-  const employees = db.prepare("SELECT * FROM employees WHERE status = 'active' ORDER BY id").all();
-  const perEmployee = employees.map((e) => {
-    const { invoices, sum, half, payout } = calcForEmployee(weekId, e.id);
-    return {
+  const employees = await all("SELECT * FROM employees WHERE status = 'active' ORDER BY id");
+  const perEmployee = [];
+  for (const e of employees) {
+    const { invoices, sum, half, payout } = await calcForEmployee(weekId, e.id);
+    perEmployee.push({
       id: e.id,
       name: e.name,
       invoice_count: invoices.length,
@@ -251,22 +235,21 @@ app.get('/api/weeks/:weekId/overview', (req, res) => {
       sum,
       half,
       payout
-    };
-  });
+    });
+  }
 
-  const totalInvoices = db.prepare('SELECT COUNT(*) AS c FROM invoices WHERE week_id = ?').get(weekId).c;
-  res.json({ week, employees: perEmployee, total_invoices: totalInvoices, checks: weekChecks(weekId) });
+  const totalInvoices = (await get('SELECT COUNT(*) AS c FROM invoices WHERE week_id = ?', [weekId])).c;
+  res.json({ week, employees: perEmployee, total_invoices: totalInvoices, checks: await weekChecks(weekId) });
 });
 
 // Weekly checks run across ALL employees (shared invoice-number pool).
-function weekChecks(weekId) {
-  const rows = db
-    .prepare(
-      `SELECT i.id, i.number, i.amount, i.paid, e.name AS employee_name
-       FROM invoices i JOIN employees e ON e.id = i.employee_id
-       WHERE i.week_id = ? ORDER BY i.number`
-    )
-    .all(weekId);
+async function weekChecks(weekId) {
+  const rows = await all(
+    `SELECT i.id, i.number, i.amount, i.paid, e.name AS employee_name
+     FROM invoices i JOIN employees e ON e.id = i.employee_id
+     WHERE i.week_id = ? ORDER BY i.number`,
+    [weekId]
+  );
 
   const byNumber = new Map();
   for (const r of rows) {
@@ -291,8 +274,8 @@ function weekChecks(weekId) {
   return { duplicates, unpaid };
 }
 
-app.get('/api/weeks/:weekId/checks', (req, res) => {
-  res.json(weekChecks(Number(req.params.weekId)));
+app.get('/api/weeks/:weekId/checks', async (req, res) => {
+  res.json(await weekChecks(Number(req.params.weekId)));
 });
 
 // ---------------------------------------------------------------- invoices
@@ -303,15 +286,13 @@ function intOrNull(v) {
   return Number.isFinite(n) ? Math.round(n) : null;
 }
 
-app.post('/api/invoices', (req, res) => {
+app.post('/api/invoices', async (req, res) => {
   const { week_id, employee_id, number, amount, paid, needs_review, photo_ref } = req.body || {};
   if (!week_id || !employee_id) return res.status(400).json({ error: 'Нет недели или сотрудника' });
-  const r = db
-    .prepare(
-      `INSERT INTO invoices (week_id, employee_id, number, amount, paid, needs_review, photo_ref)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+  const r = await run(
+    `INSERT INTO invoices (week_id, employee_id, number, amount, paid, needs_review, photo_ref)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
       Number(week_id),
       Number(employee_id),
       intOrNull(number),
@@ -319,99 +300,88 @@ app.post('/api/invoices', (req, res) => {
       paid ? 1 : 0,
       needs_review ? 1 : 0,
       photo_ref || null
-    );
-  res.json(db.prepare('SELECT * FROM invoices WHERE id = ?').get(r.lastInsertRowid));
+    ]
+  );
+  res.json(await get('SELECT * FROM invoices WHERE id = ?', [r.lastInsertRowid]));
 });
 
-app.patch('/api/invoices/:id', (req, res) => {
+app.patch('/api/invoices/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const cur = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
+  const cur = await get('SELECT * FROM invoices WHERE id = ?', [id]);
   if (!cur) return res.status(404).json({ error: 'Не найдено' });
   const b = req.body || {};
   const number = 'number' in b ? intOrNull(b.number) : cur.number;
   const amount = 'amount' in b ? intOrNull(b.amount) ?? 0 : cur.amount;
   const paid = 'paid' in b ? (b.paid ? 1 : 0) : cur.paid;
   const needs_review = 'needs_review' in b ? (b.needs_review ? 1 : 0) : cur.needs_review;
-  db.prepare('UPDATE invoices SET number = ?, amount = ?, paid = ?, needs_review = ? WHERE id = ?').run(
+  await run('UPDATE invoices SET number = ?, amount = ?, paid = ?, needs_review = ? WHERE id = ?', [
     number,
     amount,
     paid,
     needs_review,
     id
-  );
-  res.json(db.prepare('SELECT * FROM invoices WHERE id = ?').get(id));
+  ]);
+  res.json(await get('SELECT * FROM invoices WHERE id = ?', [id]));
 });
 
-app.delete('/api/invoices/:id', (req, res) => {
-  db.prepare('DELETE FROM invoices WHERE id = ?').run(Number(req.params.id));
+app.delete('/api/invoices/:id', async (req, res) => {
+  await run('DELETE FROM invoices WHERE id = ?', [Number(req.params.id)]);
   res.json({ ok: true });
 });
 
 // Delete several invoices in one request (the review screen's "select" mode).
 // Removes photo files that no invoice references anymore.
-app.post('/api/invoices/bulk-delete', (req, res) => {
+app.post('/api/invoices/bulk-delete', async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
   if (ids.length === 0) return res.json({ ok: true, deleted: 0 });
   const placeholders = ids.map(() => '?').join(',');
-  const refs = db
-    .prepare(`SELECT DISTINCT photo_ref FROM invoices WHERE id IN (${placeholders}) AND photo_ref IS NOT NULL`)
-    .all(...ids);
-  const info = db.prepare(`DELETE FROM invoices WHERE id IN (${placeholders})`).run(...ids);
-  const stillUsed = db.prepare('SELECT COUNT(*) AS c FROM invoices WHERE photo_ref = ?');
+  const refs = await all(
+    `SELECT DISTINCT photo_ref FROM invoices WHERE id IN (${placeholders}) AND photo_ref IS NOT NULL`,
+    ids
+  );
+  const info = await run(`DELETE FROM invoices WHERE id IN (${placeholders})`, ids);
   for (const { photo_ref } of refs) {
-    if (stillUsed.get(photo_ref).c === 0) {
-      try {
-        fs.unlinkSync(path.join(PHOTOS_DIR, photo_ref));
-      } catch {
-        // already gone — fine
-      }
-    }
+    const used = await get('SELECT COUNT(*) AS c FROM invoices WHERE photo_ref = ?', [photo_ref]);
+    if (used.c === 0) await deletePhoto(photo_ref);
   }
   res.json({ ok: true, deleted: info.changes });
 });
 
 // ---------------------------------------------------------------- adjustments
 
-app.post('/api/adjustments', (req, res) => {
+app.post('/api/adjustments', async (req, res) => {
   const { week_id, employee_id, label, sign, amount } = req.body || {};
   if (!week_id || !employee_id) return res.status(400).json({ error: 'Нет недели или сотрудника' });
   const labelText = String(label || '').trim();
   if (!labelText) return res.status(400).json({ error: 'Введите название' });
   const date = new Date().toISOString().slice(0, 10);
-  const r = db
-    .prepare(
-      `INSERT INTO adjustments (week_id, employee_id, type, label, sign, amount, date)
-       VALUES (?, ?, 'custom', ?, ?, ?, ?)`
-    )
-    .run(
-      Number(week_id),
-      Number(employee_id),
-      labelText,
-      sign === '+' ? '+' : '-',
-      intOrNull(amount) ?? 0,
-      date
-    );
-  res.json(db.prepare('SELECT * FROM adjustments WHERE id = ?').get(r.lastInsertRowid));
+  const r = await run(
+    `INSERT INTO adjustments (week_id, employee_id, type, label, sign, amount, date)
+     VALUES (?, ?, 'custom', ?, ?, ?, ?)`,
+    [Number(week_id), Number(employee_id), labelText, sign === '+' ? '+' : '-', intOrNull(amount) ?? 0, date]
+  );
+  res.json(await get('SELECT * FROM adjustments WHERE id = ?', [r.lastInsertRowid]));
 });
 
-app.patch('/api/adjustments/:id', (req, res) => {
+app.patch('/api/adjustments/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const cur = db.prepare('SELECT * FROM adjustments WHERE id = ?').get(id);
+  const cur = await get('SELECT * FROM adjustments WHERE id = ?', [id]);
   if (!cur) return res.status(404).json({ error: 'Не найдено' });
   const b = req.body || {};
   const amount = 'amount' in b ? intOrNull(b.amount) ?? 0 : cur.amount;
   const label = 'label' in b && cur.type === 'custom' ? String(b.label).trim() || cur.label : cur.label;
   const sign = 'sign' in b && cur.type === 'custom' ? (b.sign === '+' ? '+' : '-') : cur.sign;
-  db.prepare('UPDATE adjustments SET amount = ?, label = ?, sign = ? WHERE id = ?').run(amount, label, sign, id);
-  res.json(db.prepare('SELECT * FROM adjustments WHERE id = ?').get(id));
+  await run('UPDATE adjustments SET amount = ?, label = ?, sign = ? WHERE id = ?', [amount, label, sign, id]);
+  res.json(await get('SELECT * FROM adjustments WHERE id = ?', [id]));
 });
 
-app.delete('/api/adjustments/:id', (req, res) => {
-  const cur = db.prepare('SELECT * FROM adjustments WHERE id = ?').get(Number(req.params.id));
+app.delete('/api/adjustments/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const cur = await get('SELECT * FROM adjustments WHERE id = ?', [id]);
   if (cur && cur.type === 'standing') {
     return res.status(400).json({ error: 'Постоянные корректировки нельзя удалить' });
   }
-  db.prepare("DELETE FROM adjustments WHERE id = ? AND type = 'custom'").run(Number(req.params.id));
+  await run("DELETE FROM adjustments WHERE id = ? AND type = 'custom'", [id]);
   res.json({ ok: true });
 });
 
@@ -427,40 +397,35 @@ app.post('/api/scan', async (req, res) => {
   // Keep the original photo regardless of recognition outcome.
   const ext = mediaType === 'image/png' ? 'png' : mediaType === 'image/webp' ? 'webp' : 'jpg';
   const photoRef = `${crypto.randomUUID()}.${ext}`;
-  fs.writeFileSync(path.join(PHOTOS_DIR, photoRef), Buffer.from(base64Data, 'base64'));
+  await savePhoto(photoRef, Buffer.from(base64Data, 'base64'), mediaType);
 
-  const insert = db.prepare(
-    `INSERT INTO invoices (week_id, employee_id, number, amount, paid, needs_review, photo_ref)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  const getById = db.prepare('SELECT * FROM invoices WHERE id = ?');
+  const insertInvoice = (number, amount, paid, needsReview) =>
+    run(
+      `INSERT INTO invoices (week_id, employee_id, number, amount, paid, needs_review, photo_ref)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [Number(week_id), Number(employee_id), number, amount, paid, needsReview, photoRef]
+    );
+  const getById = (id) => get('SELECT * FROM invoices WHERE id = ?', [id]);
 
   try {
     const rows = await readInvoicesFromImage(base64Data, mediaType);
-    const created = rows.map((r) => {
-      const ins = insert.run(
-        Number(week_id),
-        Number(employee_id),
-        r.number,
-        r.amount,
-        r.paid_stamp ? 1 : 0,
-        r.needs_review ? 1 : 0,
-        photoRef
-      );
-      return getById.get(ins.lastInsertRowid);
-    });
+    const created = [];
+    for (const r of rows) {
+      const ins = await insertInvoice(r.number, r.amount, r.paid_stamp ? 1 : 0, r.needs_review ? 1 : 0);
+      created.push(await getById(ins.lastInsertRowid));
+    }
     if (created.length === 0) {
       // Nothing recognized: keep the photo visible as one empty row to fill in.
-      const ins = insert.run(Number(week_id), Number(employee_id), null, 0, 0, 1, photoRef);
-      created.push(getById.get(ins.lastInsertRowid));
+      const ins = await insertInvoice(null, 0, 0, 1);
+      created.push(await getById(ins.lastInsertRowid));
       return res.json({ ok: false, error: 'На фото не найдено накладных — проверьте строку вручную', invoices: created });
     }
     res.json({ ok: true, invoices: created });
   } catch (e) {
     logError('scan failed:', e);
     // Never drop data: surface the photo as a manual-entry row.
-    const ins = insert.run(Number(week_id), Number(employee_id), null, 0, 0, 1, photoRef);
-    const row = getById.get(ins.lastInsertRowid);
+    const ins = await insertInvoice(null, 0, 0, 1);
+    const row = await getById(ins.lastInsertRowid);
     const msg = String(e.message || '');
     let message;
     if (e.code === 'NO_KEY') {
@@ -474,15 +439,18 @@ app.post('/api/scan', async (req, res) => {
   }
 });
 
-app.get('/api/photos/:ref', (req, res) => {
+app.get('/api/photos/:ref', async (req, res) => {
   const ref = path.basename(String(req.params.ref)); // prevent path traversal
-  const file = path.join(PHOTOS_DIR, ref);
-  if (!fs.existsSync(file)) return res.status(404).end();
-  res.sendFile(file);
+  const loc = await locatePhoto(ref);
+  if (!loc) return res.status(404).end();
+  if (loc.url) return res.redirect(loc.url); // blob mode: public unguessable URL
+  res.sendFile(loc.file);
 });
 
 // ---------------------------------------------------------------- static frontend
 
+// On Vercel the built client is served by the CDN and only /api/* reaches this
+// app; the static fallback below is for the local (PC) setup.
 const DIST = path.join(ROOT_DIR, 'client', 'dist');
 app.use(express.static(DIST));
 app.use((req, res, next) => {
@@ -490,11 +458,15 @@ app.use((req, res, next) => {
   res.sendFile(path.join(DIST, 'index.html'));
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Payroll app listening on http://localhost:${PORT}`);
-  if (!isVisionConfigured()) {
-    console.warn(
-      'WARNING: no Anthropic credentials found (ANTHROPIC_API_KEY in .env, ANTHROPIC_AUTH_TOKEN, or an "ant auth login" profile) — photo recognition is disabled (manual entry still works).'
-    );
-  }
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Payroll app listening on http://localhost:${PORT}`);
+    if (!isVisionConfigured()) {
+      console.warn(
+        'WARNING: no Anthropic credentials found (ANTHROPIC_API_KEY in .env, ANTHROPIC_AUTH_TOKEN, or an "ant auth login" profile) — photo recognition is disabled (manual entry still works).'
+      );
+    }
+  });
+}
+
+export default app;

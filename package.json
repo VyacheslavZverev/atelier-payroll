@@ -7,10 +7,13 @@
   "scripts": {
     "start": "node server/index.js",
     "build": "npm --prefix client run build",
-    "icons": "node tools/gen-icons.js"
+    "icons": "node tools/gen-icons.js",
+    "migrate": "node tools/migrate-to-cloud.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
+    "@libsql/client": "^0.15.0",
+    "@vercel/blob": "^1.1.1",
     "express": "^5.2.1"
   }
 }

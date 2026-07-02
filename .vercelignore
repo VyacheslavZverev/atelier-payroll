@@ -1,0 +1,5 @@
+# Never upload local data or secrets when deploying from this directory.
+.env
+data
+tools
+client/node_modules
