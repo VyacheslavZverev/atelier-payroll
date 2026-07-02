@@ -13,12 +13,13 @@ const PROMPT = `This photo shows one or more handwritten Russian repair-shop inv
 They may be laid out in a grid, rotated, or partially overlapping.
 
 For EACH invoice visible in the photo, extract:
-1. "number": the invoice number — the figure written after "Накладная №" (integer). Use null if unreadable.
-2. "amount": the total — the figure written after "Итого" (integer, rubles, no kopecks). Use null if unreadable.
+1. "number": the invoice number after "Накладная №" (integer). Use null if unreadable.
+2. "amount": the total after "Итого" (integer, rubles, no kopecks). Use null if unreadable.
 3. "paid_stamp": true if a red "ОПЛАЧЕНО" stamp is visible anywhere on that invoice. The stamp is usually on the side; it may be rotated, partial, faint, or overlapping the text. false if no such stamp is visible.
-4. "confidence": "low" if ANY digit of the number or amount is ambiguous or hard to read, or if number/amount is null; otherwise "high".
+4. "confidence": set to "high" ONLY when you are completely certain of EVERY digit of BOTH the number and the amount. In every other case set "low".
 
-Be conservative: when a handwritten digit could plausibly be read two ways, mark confidence "low".
+Read each invoice digit by digit. The amount after "Итого" is small handwriting and by far the most error-prone field — re-read it carefully. When a handwritten digit could plausibly be read two ways (for example 1/7, 4/9, 3/8, 0/6, 5/6, 2/3), do NOT guess: set "confidence" to "low". It is far better to flag a row for the human to check than to report a wrong amount with high confidence.
+
 Return ONLY JSON of the form {"invoices": [...]} with no prose.`;
 
 const SCHEMA = {

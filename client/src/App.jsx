@@ -4,6 +4,7 @@ import Login from './views/Login.jsx';
 import Home from './views/Home.jsx';
 import Employee from './views/Employee.jsx';
 import Summary from './views/Summary.jsx';
+import MonthSummary from './views/MonthSummary.jsx';
 
 export default function App() {
   // Unlocked only if a token exists AND the app was used recently; otherwise
@@ -106,6 +107,10 @@ export default function App() {
     );
   }
 
+  if (view.name === 'month') {
+    return <MonthSummary ym={view.ym} onBack={() => setView({ name: 'home' })} onError={handleError} />;
+  }
+
   return (
     <Home
       weeks={weeks}
@@ -134,6 +139,7 @@ export default function App() {
         }
       }}
       onOpenEmployee={(employeeId) => setView({ name: 'employee', employeeId })}
+      onOpenMonth={(ym) => setView({ name: 'month', ym })}
       onError={handleError}
     />
   );

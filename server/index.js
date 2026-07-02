@@ -190,6 +190,38 @@ function calcForEmployee(weekId, employeeId) {
   return { invoices, adjustments, sum, half, deductions, bonuses, payout };
 }
 
+// Monthly analytics: sum of each employee's "50%" across every week whose date
+// falls in the given calendar month (YYYY-MM). Includes archived employees who
+// worked that month. View-only — for the owner.
+app.get('/api/months/:ym/analytics', (req, res) => {
+  const ym = String(req.params.ym);
+  if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ error: 'Некорректный месяц' });
+
+  const weeks = db.prepare("SELECT * FROM weeks WHERE substr(date, 1, 7) = ? ORDER BY id").all(ym);
+  const employees = db.prepare('SELECT * FROM employees ORDER BY id').all();
+
+  const result = [];
+  for (const e of employees) {
+    let totalHalf = 0;
+    const perWeek = [];
+    for (const w of weeks) {
+      const { invoices, half } = calcForEmployee(w.id, e.id);
+      if (invoices.length === 0) continue; // employee didn't work this week
+      perWeek.push({ week_id: w.id, label: w.label, half });
+      totalHalf += half;
+    }
+    if (perWeek.length > 0) {
+      result.push({ id: e.id, name: e.name, status: e.status, total_half: totalHalf, weeks: perWeek });
+    }
+  }
+
+  res.json({
+    month: ym,
+    weeks: weeks.map((w) => ({ id: w.id, label: w.label, date: w.date })),
+    employees: result
+  });
+});
+
 // Everything the per-employee calculation screen needs, in one call.
 app.get('/api/weeks/:weekId/employee/:employeeId', (req, res) => {
   const weekId = Number(req.params.weekId);

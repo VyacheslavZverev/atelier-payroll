@@ -1,8 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { fmt, fmtDate } from '../util.js';
+import { fmt, fmtDate, monthKey, monthLabel } from '../util.js';
 
-export default function Home({ weeks, weekId, onSelectWeek, onNewWeek, onDeleteWeek, onOpenEmployee, onError }) {
+export default function Home({
+  weeks,
+  weekId,
+  onSelectWeek,
+  onNewWeek,
+  onDeleteWeek,
+  onOpenEmployee,
+  onOpenMonth,
+  onError
+}) {
   const [overview, setOverview] = useState(null);
   const [allEmployees, setAllEmployees] = useState([]);
   const [adding, setAdding] = useState(false);
@@ -11,6 +20,21 @@ export default function Home({ weeks, weekId, onSelectWeek, onNewWeek, onDeleteW
   const [checksOpen, setChecksOpen] = useState(false);
 
   const week = weeks.find((w) => w.id === weekId) || null;
+
+  // The latest week (highest id) within each calendar month is its "month end":
+  // it carries the month-totals marker and button. The marker follows the
+  // newest week as more are added during the month.
+  const monthEndWeekIds = useMemo(() => {
+    const latestByMonth = new Map();
+    for (const w of weeks) {
+      const mk = monthKey(w.date);
+      const cur = latestByMonth.get(mk);
+      if (!cur || w.id > cur.id) latestByMonth.set(mk, w);
+    }
+    return new Set([...latestByMonth.values()].map((w) => w.id));
+  }, [weeks]);
+
+  const isMonthEnd = week && monthEndWeekIds.has(week.id);
 
   const load = useCallback(async () => {
     try {
@@ -101,6 +125,7 @@ export default function Home({ weeks, weekId, onSelectWeek, onNewWeek, onDeleteW
             {weeks.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.label} · {fmtDate(w.date)}
+                {monthEndWeekIds.has(w.id) ? ' · Итоги месяца' : ''}
               </option>
             ))}
           </select>
@@ -220,6 +245,15 @@ export default function Home({ weeks, weekId, onSelectWeek, onNewWeek, onDeleteW
             </div>
           )}
         </section>
+      )}
+
+      {isMonthEnd && (
+        <button
+          className="btn btn-secondary btn-big month-totals-btn"
+          onClick={() => onOpenMonth(monthKey(week.date))}
+        >
+          📊 Итоги месяца — {monthLabel(monthKey(week.date))}
+        </button>
       )}
     </div>
   );

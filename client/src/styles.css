@@ -594,6 +594,57 @@ body {
   font-size: 1.6rem;
 }
 
+/* ---------- monthly analytics ---------- */
+
+.month-totals-btn {
+  margin-top: 4px;
+}
+
+.month-weeks {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.month-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.month-emp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.month-emp-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.month-emp-total {
+  font-size: 1.25rem;
+  white-space: nowrap;
+}
+
+.month-emp-weeks {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.month-week-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 0.95rem;
+}
+
+.month-grand {
+  margin-top: 4px;
+}
+
 .summary-btn {
   margin-bottom: 8px;
 }
