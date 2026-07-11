@@ -435,6 +435,34 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Photo of the sheet a fresh batch came from — shown once above its rows so the
+   operator can eyeball the numbers against it; tap to open full-screen. */
+.fresh-photo {
+  display: block;
+  width: 100%;
+  padding: 4px;
+  margin: 4px 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.fresh-photo img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.capture-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
+
 .row-review {
   background: var(--warn-bg);
 }

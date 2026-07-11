@@ -211,7 +211,34 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
   const freshRows = selectMode ? [] : sortedInvoices.filter((i) => freshIds.has(i.id));
   freshRows.sort((a, b) => a.id - b.id);
   const restRows = sortedInvoices.filter((i) => freshRows.length === 0 || !freshIds.has(i.id));
-  const orderedInvoices = [...freshRows, ...restRows];
+
+  // Build the render list. Fresh rows are grouped by their source photo, each
+  // group shown under one thumbnail of that photo (a single sheet holds several
+  // invoices, so a per-row thumbnail would just repeat an unreadable image).
+  // The number-sorted rest follows. Ordinals run across everything.
+  const listItems = [];
+  let ord = 0;
+  if (freshRows.length > 0) {
+    listItems.push({ type: 'fresh-label', key: 'fresh-label' });
+    const groups = [];
+    const byRef = new Map();
+    for (const inv of freshRows) {
+      const gkey = inv.photo_ref || `solo-${inv.id}`;
+      let g = byRef.get(gkey);
+      if (!g) {
+        g = { ref: inv.photo_ref, rows: [] };
+        byRef.set(gkey, g);
+        groups.push(g);
+      }
+      g.rows.push(inv);
+    }
+    for (const g of groups) {
+      if (g.ref) listItems.push({ type: 'photo', key: `ph-${g.ref}`, ref: g.ref });
+      for (const inv of g.rows) listItems.push({ type: 'row', key: inv.id, inv, ordinal: ++ord });
+    }
+    if (restRows.length > 0) listItems.push({ type: 'rest-label', key: 'rest-label' });
+  }
+  for (const inv of restRows) listItems.push({ type: 'row', key: inv.id, inv, ordinal: ++ord });
 
   return (
     <div className="screen">
@@ -276,6 +303,9 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
         >
           Выбрать из галереи
         </button>
+        {visionReady && !scanProgress && (
+          <p className="capture-hint">📸 Снимайте по 3–4 накладные — так распознаётся точнее</p>
+        )}
         {!visionReady && (
           <p className="notice notice-warn">
             Распознавание фото не настроено (нет ключа API) — строки можно добавлять вручную.
@@ -332,17 +362,40 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
           <span className="col-x"></span>
         </div>
         {invoices.length === 0 && <p className="muted center">Пока нет накладных</p>}
-        {freshRows.length > 0 && (
-          <div className="fresh-label">🆕 Новые с последнего фото — проверьте</div>
-        )}
-        {orderedInvoices.map((inv, i) => (
-          <React.Fragment key={inv.id}>
-            {freshRows.length > 0 && i === freshRows.length && (
-              <div className="rest-label">Остальные</div>
-            )}
+        {listItems.map((it) => {
+          if (it.type === 'fresh-label') {
+            return (
+              <div key={it.key} className="fresh-label">
+                🆕 Новые с последнего фото — проверьте
+              </div>
+            );
+          }
+          if (it.type === 'rest-label') {
+            return (
+              <div key={it.key} className="rest-label">
+                Остальные
+              </div>
+            );
+          }
+          if (it.type === 'photo') {
+            return (
+              <button
+                key={it.key}
+                type="button"
+                className="fresh-photo"
+                onClick={() => setPhotoView(it.ref)}
+                title="Нажмите, чтобы увеличить"
+              >
+                <img src={photoUrl(it.ref)} alt="Фото накладных" />
+              </button>
+            );
+          }
+          const inv = it.inv;
+          return (
             <InvoiceRow
+              key={it.key}
               inv={inv}
-              ordinal={i + 1}
+              ordinal={it.ordinal}
               fresh={freshIds.has(inv.id) && !selectMode}
               selectMode={selectMode}
               selected={selectedIds.has(inv.id)}
@@ -351,8 +404,8 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
               onDelete={() => deleteInvoice(inv.id)}
               onShowPhoto={() => inv.photo_ref && setPhotoView(inv.photo_ref)}
             />
-          </React.Fragment>
-        ))}
+          );
+        })}
         {!selectMode && (
           <button className="btn btn-ghost add-row-btn" onClick={addManualRow}>
             + Добавить строку
