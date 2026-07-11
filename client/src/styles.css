@@ -414,6 +414,27 @@ body {
   min-height: 32px;
 }
 
+/* Just-scanned batch: indigo bar on the left, drawn over any review/unpaid
+   background so a fresh row can also be flagged for review at the same time. */
+.row-fresh {
+  box-shadow: inset 3px 0 0 0 var(--primary);
+}
+
+.fresh-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--primary);
+  padding: 8px 6px 4px;
+}
+
+.rest-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 10px 6px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
 .row-review {
   background: var(--warn-bg);
 }

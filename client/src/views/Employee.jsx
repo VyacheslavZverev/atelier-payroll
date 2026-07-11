@@ -14,6 +14,9 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
   const [showCustomForm, setShowCustomForm] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  // Invoices added by the most recent scan session — floated to the top and
+  // highlighted so the operator can check the fresh batch against the paper.
+  const [freshIds, setFreshIds] = useState(() => new Set());
   const [cameraOpen, setCameraOpen] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
@@ -30,12 +33,22 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
     load();
   }, [load]);
 
+  // Switching employee/week clears the "just added" highlight so it never
+  // marks another person's rows.
+  useEffect(() => {
+    setFreshIds(new Set());
+  }, [weekId, employeeId]);
+
   // ---------------- photo capture ----------------
 
   async function handleFiles(fileList) {
     const files = [...fileList];
     if (files.length === 0) return;
     setScanNotice('');
+    // Start of a new scan session — drop the previous batch's highlight and
+    // collect the ids added across this session (one or several photos).
+    const added = new Set();
+    setFreshIds(new Set());
     const errors = [];
     for (let i = 0; i < files.length; i++) {
       setScanProgress({ current: i + 1, total: files.length });
@@ -46,7 +59,9 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
           body: { week_id: weekId, employee_id: employeeId, image }
         });
         if (!res.ok && res.error) errors.push(res.error);
+        for (const inv of res.invoices) added.add(inv.id);
         setData((d) => (d ? { ...d, invoices: [...d.invoices, ...res.invoices] } : d));
+        setFreshIds(new Set(added));
       } catch (e) {
         errors.push(e.message);
       }
@@ -190,6 +205,14 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
     return a.number - b.number;
   });
 
+  // The just-scanned batch floats to the top (in scan order) so the operator
+  // can check it against the paper without hunting through the sorted list.
+  // Select mode is about bulk deletion, not review — keep the plain order there.
+  const freshRows = selectMode ? [] : sortedInvoices.filter((i) => freshIds.has(i.id));
+  freshRows.sort((a, b) => a.id - b.id);
+  const restRows = sortedInvoices.filter((i) => freshRows.length === 0 || !freshIds.has(i.id));
+  const orderedInvoices = [...freshRows, ...restRows];
+
   return (
     <div className="screen">
       <header className="app-header">
@@ -309,18 +332,26 @@ export default function Employee({ weekId, employeeId, visionReady, onBack, onSu
           <span className="col-x"></span>
         </div>
         {invoices.length === 0 && <p className="muted center">Пока нет накладных</p>}
-        {sortedInvoices.map((inv, i) => (
-          <InvoiceRow
-            key={inv.id}
-            inv={inv}
-            ordinal={i + 1}
-            selectMode={selectMode}
-            selected={selectedIds.has(inv.id)}
-            onToggleSelected={() => toggleSelected(inv.id)}
-            onPatch={(patch) => patchInvoice(inv.id, patch)}
-            onDelete={() => deleteInvoice(inv.id)}
-            onShowPhoto={() => inv.photo_ref && setPhotoView(inv.photo_ref)}
-          />
+        {freshRows.length > 0 && (
+          <div className="fresh-label">🆕 Новые с последнего фото — проверьте</div>
+        )}
+        {orderedInvoices.map((inv, i) => (
+          <React.Fragment key={inv.id}>
+            {freshRows.length > 0 && i === freshRows.length && (
+              <div className="rest-label">Остальные</div>
+            )}
+            <InvoiceRow
+              inv={inv}
+              ordinal={i + 1}
+              fresh={freshIds.has(inv.id) && !selectMode}
+              selectMode={selectMode}
+              selected={selectedIds.has(inv.id)}
+              onToggleSelected={() => toggleSelected(inv.id)}
+              onPatch={(patch) => patchInvoice(inv.id, patch)}
+              onDelete={() => deleteInvoice(inv.id)}
+              onShowPhoto={() => inv.photo_ref && setPhotoView(inv.photo_ref)}
+            />
+          </React.Fragment>
         ))}
         {!selectMode && (
           <button className="btn btn-ghost add-row-btn" onClick={addManualRow}>
@@ -457,8 +488,9 @@ function NumberInput({ value, onCommit }) {
   );
 }
 
-function InvoiceRow({ inv, ordinal, selectMode, selected, onToggleSelected, onPatch, onDelete, onShowPhoto }) {
+function InvoiceRow({ inv, ordinal, fresh, selectMode, selected, onToggleSelected, onPatch, onDelete, onShowPhoto }) {
   const classes = ['invoice-row'];
+  if (fresh) classes.push('row-fresh');
   if (inv.needs_review) classes.push('row-review');
   if (!inv.paid) classes.push('row-unpaid');
   if (selectMode && selected) classes.push('row-selected');
