@@ -17,10 +17,10 @@ Each stub is pre-printed with, top to bottom: "Накладная №" followed 
 For EACH invoice visible in the photo, extract:
 1. "number": the invoice number after "Накладная №" (integer). Use null if unreadable.
 2. "amount": the total after "Итого" (integer, rubles, no kopecks). Use null if unreadable.
-3. "paid_stamp": true if a red "ОПЛАЧЕНО" stamp is visible anywhere on that invoice, false otherwise. On the current forms the stamp is in the BOTTOM-RIGHT corner of the stub, over or next to the "Комильфо" name and phone number. Older forms still in circulation carry it along the side instead, usually rotated. Accept either position — the stamp may be rotated, partial, faint, or overlapping printed text.
-4. "confidence": set to "high" ONLY when you are completely certain of EVERY digit of BOTH the number and the amount. In every other case set "low".
+3. "paid_stamp": true if an "ОПЛАЧЕНО" stamp is visible anywhere on that invoice, false otherwise. The ink is pink/magenta (it can look faded red). Position varies: most often the BOTTOM-RIGHT corner near the "Комильфо" name and phone, but also along the side rotated 90°, or straight across the middle over the handwriting. Accept any position — the stamp may be rotated, partial, faint, or overlapping text.
+4. "confidence": "low" when a digit is genuinely ambiguous — obscured by the stamp, cut off at the edge, smudged, crossed out and rewritten, or shaped so it could plausibly be read two ways (1/7, 4/9, 3/8, 0/6, 5/6, 2/3). "high" when the digits are legible and you would read them the same way on a second look, even if the handwriting is untidy. Untidy but readable is NOT a reason for "low".
 
-Read each invoice digit by digit. The amount after "Итого" is small handwriting and by far the most error-prone field — re-read it carefully. When a handwritten digit could plausibly be read two ways (for example 1/7, 4/9, 3/8, 0/6, 5/6, 2/3), do NOT guess: set "confidence" to "low". It is far better to flag a row for the human to check than to report a wrong amount with high confidence.
+Read each invoice digit by digit. The amount after "Итого" is small handwriting and by far the most error-prone field — re-read it before answering. If after that second look a digit is still ambiguous, report your best reading but set "confidence" to "low" so a human checks it. Flag the rows that genuinely need a second pair of eyes, not every row: a flag on everything is the same as no flag at all.
 
 Return ONLY JSON of the form {"invoices": [...]} with no prose.`;
 
