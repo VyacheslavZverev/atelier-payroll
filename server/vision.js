@@ -12,10 +12,12 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const PROMPT = `This photo shows one or more handwritten Russian repair-shop invoices ("Накладная").
 They may be laid out in a grid, rotated, or partially overlapping.
 
+Each stub is pre-printed with, top to bottom: "Накладная №" followed by the number, "Вид работ" with ruled lines for the work description, "Итого:" with the total, and at the bottom the shop name "Комильфо" with a phone number.
+
 For EACH invoice visible in the photo, extract:
 1. "number": the invoice number after "Накладная №" (integer). Use null if unreadable.
 2. "amount": the total after "Итого" (integer, rubles, no kopecks). Use null if unreadable.
-3. "paid_stamp": true if a red "ОПЛАЧЕНО" stamp is visible anywhere on that invoice. The stamp is usually on the side; it may be rotated, partial, faint, or overlapping the text. false if no such stamp is visible.
+3. "paid_stamp": true if a red "ОПЛАЧЕНО" stamp is visible anywhere on that invoice, false otherwise. On the current forms the stamp is in the BOTTOM-RIGHT corner of the stub, over or next to the "Комильфо" name and phone number. Older forms still in circulation carry it along the side instead, usually rotated. Accept either position — the stamp may be rotated, partial, faint, or overlapping printed text.
 4. "confidence": set to "high" ONLY when you are completely certain of EVERY digit of BOTH the number and the amount. In every other case set "low".
 
 Read each invoice digit by digit. The amount after "Итого" is small handwriting and by far the most error-prone field — re-read it carefully. When a handwritten digit could plausibly be read two ways (for example 1/7, 4/9, 3/8, 0/6, 5/6, 2/3), do NOT guess: set "confidence" to "low". It is far better to flag a row for the human to check than to report a wrong amount with high confidence.
@@ -235,9 +237,15 @@ async function readViaOpenRouter(base64Data, mediaType, model) {
     body: JSON.stringify({
       model,
       ...(fallbacks.length > 0 ? { models: [model, ...fallbacks] } : {}),
-      // ~35 output tokens per invoice; a photo holds at most a dozen stubs.
-      // Keep the cap modest so scans work even on a near-empty balance.
-      max_tokens: 1500,
+      // Reading printed fields off a photo needs no chain of thought, and on
+      // models that think by default (Sonnet 5) the reasoning tokens are billed
+      // AND counted against max_tokens — 900+ of them once truncated the JSON
+      // mid-array, which surfaced as PARSE_FAILED and silently fell back.
+      reasoning: { enabled: false },
+      // ~35 output tokens per invoice; a photo holds at most a dozen stubs, so
+      // the JSON itself is small. The headroom is for models that ignore the
+      // reasoning switch and think anyway.
+      max_tokens: 4000,
       messages: [
         {
           role: 'user',
