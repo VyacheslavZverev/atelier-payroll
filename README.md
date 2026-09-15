@@ -5,6 +5,23 @@ invoices ("накладные"): photograph → auto-read (Claude vision) → ve
 auto-calculate → clean hand-back sheet. Single operator (the shop owner),
 Russian UI. Runs hosted on Vercel, or locally on any machine.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/screenshots/01-home.png" alt="Week overview" width="240"></td>
+    <td align="center" width="33%"><img src="docs/screenshots/02-employee.png" alt="Invoice review" width="240"></td>
+    <td align="center" width="33%"><img src="docs/screenshots/03-summary.png" alt="Payout sheet" width="240"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Week overview</b><br>Payout per employee, with badges for rows that still need checking or have no paid stamp.</td>
+    <td align="center"><b>Invoice review</b><br>Rows read off the photo. Low-confidence reads are highlighted for a second look.</td>
+    <td align="center"><b>Payout sheet</b><br>The hand-back sheet, mirroring the shop's paper layout. Saves as an image or copies as text.</td>
+  </tr>
+</table>
+
+<sub>Screenshots use invented names and amounts, not real shop data.</sub>
+
 ## Stack
 
 - **Frontend:** React + Vite, installable PWA (manifest + service worker), camera via `getUserMedia` / `<input capture>`
