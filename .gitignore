@@ -3,3 +3,6 @@ client/node_modules/
 client/dist/
 data/
 .env
+
+# local tooling (machine-specific paths)
+.claude/
